@@ -131,14 +131,17 @@ export class ObjectiveModel extends Model {
     const id: string = objectiveId(objectiveToBeStored);
 
     return tx.transaction(async trx => {
-      const model = await ObjectiveModel.query(trx).insert({
-        objectiveId: id,
-        status: objectiveToBeStored.status,
-        type: objectiveToBeStored.type,
-        data: objectiveToBeStored.data,
-        createdAt: new Date().toISOString(),
-        progressLastMadeAt: new Date().toISOString(),
-      });
+      const model = await ObjectiveModel.query(trx)
+        .insert({
+          objectiveId: id,
+          status: objectiveToBeStored.status,
+          type: objectiveToBeStored.type,
+          data: objectiveToBeStored.data,
+          createdAt: new Date().toISOString(),
+          progressLastMadeAt: new Date().toISOString(),
+        })
+        .onConflict('objectiveId')
+        .ignore(); // this makes it an upsert
 
       // Associate the objective with any channel that it references
       // By inserting an ObjectiveChannel row for each channel
