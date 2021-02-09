@@ -127,7 +127,7 @@ export class ObjectiveModel extends Model {
       status: 'pending' | 'approved' | 'rejected' | 'failed' | 'succeeded';
     },
     tx: TransactionOrKnex
-  ): Promise<DBObjective> {
+  ): Promise<O> {
     const id: string = objectiveId(objectiveToBeStored);
 
     return tx.transaction(async trx => {
