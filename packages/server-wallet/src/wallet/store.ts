@@ -391,7 +391,7 @@ export class Store {
   /**
    * Ensure the provided objective is stored in the database.
    * Returns the objective as a DBObjective
-   * Throws if the channes in scope is not in the database.
+   * Throws if the channel in scope is not in the database.
    */
   async ensureObjective<O extends DBObjective>(
     objective: SupportedObjective,
