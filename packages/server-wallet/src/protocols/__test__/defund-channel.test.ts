@@ -63,8 +63,8 @@ beforeEach(async () => {
   objective = createPendingObjective(testChan.channelId);
   objective2 = createPendingObjective(testChan2.channelId);
 
-  await knex.transaction(tx => store.ensureObjective(objective, tx));
-  await knex.transaction(tx => store.ensureObjective(objective2, tx));
+  await knex.transaction(tx => store.ensureObjective(objective, 'approved', tx));
+  await knex.transaction(tx => store.ensureObjective(objective2, 'approved', tx));
 
   pushSpy = jest.spyOn(chainService, 'pushOutcomeAndWithdraw');
   withdrawSpy = jest.spyOn(chainService, 'concludeAndWithdraw');
