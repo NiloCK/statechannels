@@ -28,7 +28,7 @@ function extractReferencedChannels(objective: Objective): string[] {
   }
 }
 
-type ObjectiveStatus = 'pending' | 'approved' | 'rejected' | 'failed' | 'succeeded';
+export type ObjectiveStatus = 'pending' | 'approved' | 'rejected' | 'failed' | 'succeeded';
 
 type WalletObjective<O extends Objective> = O & {
   objectiveId: string;
@@ -48,7 +48,7 @@ export function isSharedObjective(
   return objective.type === 'OpenChannel' || objective.type === 'CloseChannel';
 }
 
-type SupportedObjective = OpenChannel | CloseChannel | SubmitChallenge | DefundChannel;
+export type SupportedObjective = OpenChannel | CloseChannel | SubmitChallenge | DefundChannel;
 /**
  * A DBObjective is a wire objective with a status, timestamps and an objectiveId
  *
