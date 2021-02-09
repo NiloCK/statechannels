@@ -591,7 +591,7 @@ export class Store {
       if (role === 'ledger')
         await Channel.setLedger(
           channel.channelId,
-          checkThat(channel.latest.outcome, isSimpleAllocation).assetHolderAddress,
+          checkThat(outcome, isSimpleAllocation).assetHolderAddress,
           tx
         );
 
