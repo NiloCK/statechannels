@@ -76,6 +76,8 @@ export const toWireObjective = (dbObj: DBObjective): SharedObjective => {
   };
 };
 
+type FlattenedDBObjective = {[P in keyof DBObjective]: DBObjective[P]}; // this destroys the correlations in the union type
+type Columns = Omit<FlattenedDBObjective, 'participants'>;
 export class ObjectiveChannelModel extends Model {
   readonly objectiveId!: DBObjective['objectiveId'];
   readonly channelId!: string;
@@ -86,7 +88,7 @@ export class ObjectiveChannelModel extends Model {
   }
 }
 
-export class ObjectiveModel extends Model {
+export class ObjectiveModel extends Model implements Columns {
   readonly objectiveId!: DBObjective['objectiveId'];
   readonly status!: DBObjective['status'];
   readonly type!: DBObjective['type'];
@@ -211,9 +213,13 @@ export class ObjectiveModel extends Model {
   }
 
   toObjective<O extends DBObjective = DBObjective>(): O {
-    const withParticipants = {
+    const withParticipants: FlattenedDBObjective = {
+      objectiveId: this.objectiveId,
+      status: this.status,
       type: this.type,
       data: this.data,
+      createdAt: this.createdAt,
+      progressLastMadeAt: this.progressLastMadeAt,
       participants: [] as DBObjective['participants'],
     };
     switch (this.type) {
