@@ -10,12 +10,13 @@ import {
   Participant,
   PrivateKey,
   serializeState,
-  SharedObjective,
   SignedStateWithHash,
   SimpleAllocation,
   simpleEthAllocation,
   State,
   NULL_APP_DATA,
+  CloseChannel,
+  OpenChannel,
 } from '@statechannels/wallet-core';
 import {ETH_ASSET_HOLDER_ADDRESS} from '@statechannels/wallet-core/lib/src/config';
 import {SignedState as WireState, Payload} from '@statechannels/wire-format';
@@ -180,7 +181,7 @@ export class TestChannel {
     return calculateChannelId(this.channelConstants);
   }
 
-  public get openChannelObjective(): SharedObjective {
+  public get openChannelObjective(): OpenChannel {
     return {
       participants: this.participants,
       type: 'OpenChannel',
@@ -191,7 +192,7 @@ export class TestChannel {
     };
   }
 
-  public get closeChannelObjective(): SharedObjective {
+  public get closeChannelObjective(): CloseChannel {
     return {
       participants: this.participants,
       type: 'CloseChannel',
@@ -269,9 +270,8 @@ export class TestChannel {
     }
 
     const objective = await store.transaction(async tx => {
-      // need to do this to set the funding type
-      const o = await store.ensureObjective(this.openChannelObjective, tx);
-      await store.approveObjective(o.objectiveId, tx);
+      // TODO: need to set the funding type
+      const o = await store.ensureObjective(this.openChannelObjective, 'approved', tx);
 
       return o as DBOpenChannelObjective;
     });

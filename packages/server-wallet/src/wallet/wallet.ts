@@ -352,6 +352,7 @@ export class SingleThreadedWallet
           participants: [],
           data: {targetChannelId: channelId},
         },
+        'approved',
         tx
       );
       this.emit('objectiveStarted', objective);
@@ -1005,6 +1006,7 @@ export class SingleThreadedWallet
           participants: [],
           data: {targetChannelId: arg.channelId},
         },
+        'approved',
         tx
       );
       this.emit('objectiveStarted', objective);

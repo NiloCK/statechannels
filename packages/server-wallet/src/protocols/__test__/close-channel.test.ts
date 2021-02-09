@@ -100,8 +100,8 @@ const setup = async (
 
   // add the closeChannel objective and approve
   const objective = await store.transaction(async tx => {
-    const o = await store.ensureObjective(testChan.closeChannelObjective, tx);
-    await store.approveObjective(o.objectiveId, tx);
+    const o = await store.ensureObjective(testChan.closeChannelObjective, 'approved', tx);
+
     return o as DBCloseChannelObjective;
   });
 
