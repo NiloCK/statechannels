@@ -76,7 +76,7 @@ describe('when there is an active challenge', () => {
 
     // Store objective
     const objective = createPendingObjective(c.channelId);
-    await knex.transaction(tx => ObjectiveModel.insert(objective, tx));
+    await knex.transaction(tx => ObjectiveModel.ensure(objective, tx));
     // Setup spies
     const concludeSpy = jest.spyOn(chainService, 'concludeAndWithdraw');
 
