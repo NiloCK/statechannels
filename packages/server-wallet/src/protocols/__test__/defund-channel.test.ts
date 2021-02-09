@@ -46,7 +46,7 @@ describe('when there is no challenge or finalized channel', () => {
 
     // Set the objective in the database
     const objective = await createPendingObjective(c.channelId);
-    await knex.transaction(tx => store.ensureObjective(objective, tx));
+    await knex.transaction(tx => store.ensureObjective(objective, 'approved', tx));
 
     const pushSpy = jest.spyOn(chainService, 'pushOutcomeAndWithdraw');
     const withdrawSpy = jest.spyOn(chainService, 'concludeAndWithdraw');
@@ -102,7 +102,7 @@ describe('when there is an active challenge', () => {
 
     // Store the objective
     const objective = createPendingObjective(c.channelId);
-    await knex.transaction(tx => store.ensureObjective(objective, tx));
+    await knex.transaction(tx => store.ensureObjective(objective, 'approved', tx));
 
     // Crank the protocol
     await channelDefunder.crank(objective, WalletResponse.initialize());
@@ -132,7 +132,7 @@ describe('when the channel is finalized on chain', () => {
 
     // Set the objective in the database
     const objective = await createPendingObjective(c.channelId);
-    await knex.transaction(tx => store.ensureObjective(objective, tx));
+    await knex.transaction(tx => store.ensureObjective(objective, 'approved', tx));
 
     const pushSpy = jest.spyOn(chainService, 'pushOutcomeAndWithdraw');
 
@@ -160,7 +160,7 @@ describe('when the channel is finalized on chain', () => {
 
     // Store the objective
     const obj = createPendingObjective(c.channelId);
-    await knex.transaction(tx => store.ensureObjective(obj, tx));
+    await knex.transaction(tx => store.ensureObjective(obj, 'approved', tx));
 
     const pushSpy = jest.spyOn(chainService, 'pushOutcomeAndWithdraw');
     const withdrawSpy = jest.spyOn(chainService, 'concludeAndWithdraw');
@@ -191,7 +191,7 @@ describe('when the channel is finalized on chain', () => {
 
     // Set the objective in the database
     const objective = await createPendingObjective(c.channelId);
-    await knex.transaction(tx => store.ensureObjective(objective, tx));
+    await knex.transaction(tx => store.ensureObjective(objective, 'approved', tx));
 
     // Crank the protocol
     await expect(channelDefunder.crank(objective, WalletResponse.initialize())).rejects.toThrow(
@@ -214,7 +214,7 @@ it('should fail when using non-direct funding', async () => {
 
   // Store the objective
   const obj = createPendingObjective(c.channelId);
-  await knex.transaction(tx => store.ensureObjective(obj, tx));
+  await knex.transaction(tx => store.ensureObjective(obj, 'approved', tx));
 
   // Crank the protocol
   await channelDefunder.crank(obj, WalletResponse.initialize());

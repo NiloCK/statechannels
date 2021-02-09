@@ -51,7 +51,9 @@ describe(`challenge-submitter`, () => {
       data: {targetChannelId: c.channelId},
     };
 
-    const dbObjective = await knex.transaction(tx => store.ensureSubmitChallengeObjective(obj, tx));
+    const dbObjective = await knex.transaction(tx =>
+      store.ensureObjective<DBSubmitChallengeObjective>(obj, 'approved', tx)
+    );
     await await crankAndAssert(dbObjective, {callsChallenge: false, completesObj: false});
   });
   it(`takes no action if there is an existing challenge`, async () => {
@@ -68,7 +70,9 @@ describe(`challenge-submitter`, () => {
       data: {targetChannelId: c.channelId},
     };
 
-    const objective = await knex.transaction(tx => store.ensureSubmitChallengeObjective(obj, tx));
+    const objective = await knex.transaction(tx =>
+      store.ensureObjective<DBSubmitChallengeObjective>(obj, 'approved', tx)
+    );
     await await crankAndAssert(objective, {callsChallenge: false, completesObj: false});
   });
 
@@ -86,7 +90,9 @@ describe(`challenge-submitter`, () => {
       data: {targetChannelId: c.channelId},
     };
 
-    const objective = await knex.transaction(tx => store.ensureSubmitChallengeObjective(obj, tx));
+    const objective = await knex.transaction(tx =>
+      store.ensureObjective<DBSubmitChallengeObjective>(obj, 'approved', tx)
+    );
     await await crankAndAssert(objective, {
       callsChallenge: true,
       completesObj: true,

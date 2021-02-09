@@ -1,11 +1,12 @@
+import {FundingStrategy} from '@statechannels/client-api-schema';
 import {
   Address,
   ChannelConstants,
   makeAddress,
   serializeState,
-  SharedObjective,
   SignedStateWithHash,
   SimpleAllocation,
+  OpenChannel,
 } from '@statechannels/wallet-core';
 import {Payload, SignedState as WireState} from '@statechannels/wire-format';
 
@@ -36,14 +37,14 @@ export class TestLedgerChannel extends TestChannel {
     super(args);
   }
 
-  public get openChannelObjective(): SharedObjective {
+  public get openChannelObjective(): OpenChannel {
     return {
       participants: this.participants,
       type: 'OpenChannel',
       data: {
         role: 'ledger',
         targetChannelId: this.channelId,
-        fundingStrategy: 'Direct',
+        fundingStrategy: 'Direct' as FundingStrategy,
       },
     };
   }

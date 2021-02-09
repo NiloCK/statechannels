@@ -18,6 +18,7 @@ export class CloseChannelObjective {
             participants: [],
             data: {targetChannelId: channelId, fundingStrategy: channel.fundingStrategy},
           },
+          'approved',
           tx
         );
         // add new objective to the response
