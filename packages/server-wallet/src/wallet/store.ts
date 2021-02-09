@@ -582,8 +582,19 @@ export class Store {
     role: 'app' | 'ledger' = 'app',
     fundingLedgerChannelId?: Bytes32
   ): Promise<{channel: ChannelState; firstSignedState: SignedState; objective: DBObjective}> {
+    if (!_.includes(['Ledger', 'Direct', 'Fake'], fundingStrategy))
+      throw new StoreError(StoreError.reasons.unimplementedFundingStrategy, {fundingStrategy});
+
     return await this.knex.transaction(async tx => {
       const channel = await createChannel(constants, fundingStrategy, fundingLedgerChannelId, tx);
+
+      if (role === 'ledger')
+        await Channel.setLedger(
+          channel.channelId,
+          checkThat(channel.latest.outcome, isSimpleAllocation).assetHolderAddress,
+          tx
+        );
+
       const {channelId, participants} = channel;
       const firstSignedState = await this.signState(
         channel,
