@@ -17,10 +17,13 @@ import {
   NULL_APP_DATA,
   CloseChannel,
   OpenChannel,
+  isSimpleAllocation,
+  checkThat,
 } from '@statechannels/wallet-core';
 import {ETH_ASSET_HOLDER_ADDRESS} from '@statechannels/wallet-core/lib/src/config';
 import {SignedState as WireState, Payload} from '@statechannels/wire-format';
 
+import {Channel} from '../../../models/channel';
 import {DBOpenChannelObjective} from '../../../models/objective';
 import {SigningWallet} from '../../../models/signing-wallet';
 import {WALLET_VERSION} from '../../../version';
@@ -270,8 +273,14 @@ export class TestChannel {
     }
 
     const objective = await store.transaction(async tx => {
-      // TODO: need to set the funding type
       const o = await store.ensureObjective(this.openChannelObjective, 'approved', tx);
+      // set the funding type
+      if (this.openChannelObjective.data.role === 'ledger')
+        await Channel.setLedger(
+          this.channelId,
+          checkThat(this.startOutcome, isSimpleAllocation).assetHolderAddress,
+          tx
+        );
 
       return o as DBOpenChannelObjective;
     });
