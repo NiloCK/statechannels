@@ -420,7 +420,7 @@ export class Store {
 
     const objectiveToBeStored = {...objective, status: 'pending' as const};
 
-    return ObjectiveModel.insert(objectiveToBeStored, tx) as Promise<DBDefundChannelObjective>;
+    return ObjectiveModel.ensure(objectiveToBeStored, tx);
   }
 
   async ensureSubmitChallengeObjective(
@@ -440,7 +440,7 @@ export class Store {
       status: 'pending' as const,
     };
 
-    return ObjectiveModel.insert(objectiveToBeStored, tx) as Promise<DBSubmitChallengeObjective>;
+    return ObjectiveModel.ensure(objectiveToBeStored, tx);
   }
 
   async ensureOpenChannelObjective(
@@ -485,7 +485,7 @@ export class Store {
       .returning('*')
       .first();
 
-    return ObjectiveModel.insert(objectiveToBeStored, tx) as Promise<DBOpenChannelObjective>;
+    return ObjectiveModel.ensure(objectiveToBeStored, tx);
   }
 
   async ensureCloseChannelObjective(
@@ -513,7 +513,7 @@ export class Store {
       },
     };
 
-    return ObjectiveModel.insert(objectiveToBeStored, tx) as Promise<DBCloseChannelObjective>;
+    return ObjectiveModel.ensure(objectiveToBeStored, tx);
   }
 
   async isLedger(channelId: Bytes32, tx?: Transaction): Promise<boolean> {
