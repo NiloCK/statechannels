@@ -122,6 +122,13 @@ export class ObjectiveModel extends Model {
     };
   }
 
+  /**
+   * Inserts an objective if it does not already exist, otherwise does nothing
+   * Associates the objective to all "referenced channels" (a.k.a. "channels in scope")
+   * by adding rows to a join table referencing the channels table.
+   * @param objectiveToBeStored
+   * @param tx
+   */
   static async ensure<O extends DBObjective>(
     objectiveToBeStored: SupportedObjective & {
       status: 'pending' | 'approved' | 'rejected' | 'failed' | 'succeeded';
