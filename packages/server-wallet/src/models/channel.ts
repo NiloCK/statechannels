@@ -37,6 +37,7 @@ import {ObjectiveModel} from './objective';
 import {LedgerRequest} from './ledger-request';
 import {ChainServiceRequest} from './chain-service-request';
 import {AdjudicatorStatusModel} from './adjudicator-status';
+import {State} from './channel/state';
 
 export const REQUIRED_COLUMNS = [
   'chainId',
@@ -350,6 +351,25 @@ export class Channel extends Model implements ChannelColumns {
 
   get latest(): SignedStateWithHash {
     return {...this.channelConstants, ...this.signedStates[0]};
+  }
+
+  get latestTurnNum(): number {
+    return this.latest.turnNum;
+  }
+
+  /**
+   * Return the unique state at a given turnNumber
+   *
+   * @remarks
+   * Returns undefined if there is no state, or if there's more than one state, with turnNum
+   *
+   * @param turnNum - The turnNum that the state should have
+   * @returns The unique state if there is one, undefined otherwise
+   */
+  public uniqueStateAt(turnNum: number): State | undefined {
+    const states = this.signedStates.filter(s => s.turnNum === turnNum);
+    if (states.length !== 1) return undefined;
+    return new State(states[0]);
   }
 
   private get _supported(): SignedStateWithHash | undefined {

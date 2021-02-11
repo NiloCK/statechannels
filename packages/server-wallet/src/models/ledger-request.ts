@@ -1,6 +1,6 @@
 import {Model, TransactionOrKnex} from 'objection';
 
-import {Bytes32} from '../type-aliases';
+import {Bytes32, Uint256} from '../type-aliases';
 
 export type LedgerRequestStatus =
   | 'pending' // Request added to DB to be handled by ProcessLedgerQueue
@@ -11,6 +11,9 @@ export interface LedgerRequestType {
   ledgerChannelId: Bytes32;
   channelToBeFunded: Bytes32;
   status: LedgerRequestStatus;
+  amountA: Uint256;
+  amountB: Uint256;
+  missedOpportunityCount: number;
   type: 'fund' | 'defund';
 }
 
@@ -19,6 +22,9 @@ export class LedgerRequest extends Model implements LedgerRequestType {
   ledgerChannelId!: LedgerRequestType['ledgerChannelId'];
   status!: LedgerRequestType['status'];
   type!: LedgerRequestType['type'];
+  amountA!: string;
+  amountB!: string;
+  missedOpportunityCount!: number;
 
   static tableName = 'ledger_requests';
   static get idColumn(): string[] {
@@ -37,6 +43,12 @@ export class LedgerRequest extends Model implements LedgerRequestType {
     await LedgerRequest.query(tx).insert(request);
   }
 
+  async markAsFailed(tx: TransactionOrKnex): Promise<void> {
+    await LedgerRequest.query(tx)
+      .findById([this.channelToBeFunded, this.type])
+      .patch({status: 'failed'});
+  }
+
   static async setRequestStatus(
     channelToBeFunded: Bytes32,
     type: 'fund' | 'defund',
@@ -49,17 +61,19 @@ export class LedgerRequest extends Model implements LedgerRequestType {
   static async getPendingRequests(
     ledgerChannelId: string,
     tx: TransactionOrKnex
-  ): Promise<LedgerRequestType[]> {
+  ): Promise<LedgerRequest[]> {
     return LedgerRequest.query(tx).select().where({ledgerChannelId, status: 'pending'});
   }
 
-  static async getAllPendingRequests(tx: TransactionOrKnex): Promise<LedgerRequestType[]> {
+  static async getAllPendingRequests(tx: TransactionOrKnex): Promise<LedgerRequest[]> {
     return LedgerRequest.query(tx).where({status: 'pending'});
   }
 
   static async requestLedgerFunding(
     channelToBeFunded: Bytes32,
     ledgerChannelId: Bytes32,
+    amountA: Uint256, // amount to be removed from/added to participant 0's balance
+    amountB: Uint256, // amount to be removed from/added to participant 0's balance
     tx: TransactionOrKnex
   ): Promise<void> {
     await this.setRequest(
@@ -67,7 +81,10 @@ export class LedgerRequest extends Model implements LedgerRequestType {
         ledgerChannelId,
         status: 'pending',
         channelToBeFunded,
+        amountA,
+        amountB,
         type: 'fund',
+        missedOpportunityCount: 0,
       },
       tx
     );
@@ -76,6 +93,8 @@ export class LedgerRequest extends Model implements LedgerRequestType {
   static async requestLedgerDefunding(
     channelToBeFunded: Bytes32,
     ledgerChannelId: Bytes32,
+    amountA: Uint256, // amount to be removed from/added to participant 0's balance
+    amountB: Uint256, // amount to be removed from/added to participant 0's balance
     tx: TransactionOrKnex
   ): Promise<void> {
     await this.setRequest(
@@ -83,7 +102,10 @@ export class LedgerRequest extends Model implements LedgerRequestType {
         ledgerChannelId,
         status: 'pending',
         channelToBeFunded,
+        amountA,
+        amountB,
         type: 'defund',
+        missedOpportunityCount: 0,
       },
       tx
     );

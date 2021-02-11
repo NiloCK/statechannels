@@ -583,14 +583,14 @@ export class Store {
     return _.map(query, 'channelId');
   }
 
-  async getAllPendingLedgerRequests(tx?: Transaction): Promise<LedgerRequestType[]> {
+  async getAllPendingLedgerRequests(tx?: Transaction): Promise<LedgerRequest[]> {
     return LedgerRequest.getAllPendingRequests(tx || this.knex);
   }
 
   async getPendingLedgerRequests(
     ledgerChannelId: Bytes32,
     tx?: Transaction
-  ): Promise<LedgerRequestType[] | undefined> {
+  ): Promise<LedgerRequest[]> {
     return LedgerRequest.getPendingRequests(ledgerChannelId, tx || this.knex);
   }
 
