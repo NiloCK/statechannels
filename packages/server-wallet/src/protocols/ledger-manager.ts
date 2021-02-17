@@ -10,6 +10,7 @@ import {SimpleAllocationOutcome} from '../models/channel/outcome';
 import {LedgerRequest} from '../models/ledger-request';
 
 // Ledger Update algorithm:
+// ------------------------
 //
 // Define the "leader" of the channel to be the first participant.
 // Let the other participant be the "follower".
@@ -36,6 +37,52 @@ import {LedgerRequest} from '../models/ledger-request';
 //    * Otherwise, removes the states that are not in queue and formulates new state.
 //      The state is now Counter-proposal
 // * In Counter-proposal, does nothing
+//
+//
+// Managing the request queue:
+// ---------------------------
+//
+// Requests can exist in one of 6 states:
+// 1. queued - when waiting to go into a proposal
+// 2. pending - request included in current proposal/counter-proposal signed by us
+// 3. success - [terminal] when included in an agreed state
+// 4. cancelled - [terminal] if a defund is sent before the fund was included in the ledger
+// 5. insufficient-funds - [terminal] if there aren't enough funds in the ledger
+// 6. failed - [terminal] if the ledger ends due to a closure or a protocol exception
+//
+//      ┌────────────────────────┐
+//      │                        v
+//   queued <---> pending ---> success               failed [from any state]
+//      │
+//      ├──────────────────┐
+//      v                  v
+//   cancelled      insufficient-funds
+//
+// Requests also maintain a missedOpportunityCount and a lastAgreedStateSeen.
+//
+// The missedOpportunityCount tracks how many agreed states the request has failed to be
+// included in. Protocols can use this to determine whether a request has stalled (e.g. if
+// their counterparty isn't processing the objective anymore).
+//
+// The lastAgreedStateSeen is a piece of bookkeeping to so that the LedgerManager can
+// accurately update the missedOpportunityCount.
+//
+// 1. see which requests are in the agreed state
+//    - mark them as success, also setting lastAgreedStateSeen
+//    - for all other requests, if haven't seen this agreedState:
+//      - increase the lastAgreedStateSeen
+//      - increase missedOps
+//      - mark as queued
+// 2. cancel out any queued defundings + fundings => mark these as cancelled
+// 3. decide whether to sign the current state
+//    - if yes, mark all included as done
+//    - and for all other requests, if haven't seen this agreedState (they won't have!):
+//      - increase the lastAgreedStateSeen
+//      - increase missedOps
+//      - mark as queued
+// 4. decide whether to propose a new state
+//    - if yes, mark all included as pending
+//    - if any don't fit, mark them as insuffient-funds
 //
 export class LedgerManager {
   private store: Store;
@@ -66,6 +113,9 @@ export class LedgerManager {
       if (!ledger.isRunning) return false;
       if (!ledger.isLedger) return false;
 
+      // grab the requests
+      // mark any that are agreed as done
+
       if (ledger.myIndex === 0) {
         await this.crankAsLeader(ledger, response, tx);
       } else {
@@ -93,12 +143,8 @@ export class LedgerManager {
     if (ledgerState.type === 'counter-proposal') {
       const {antepenultimateState} = ledgerState;
 
-      const result = await this.compareChangesWithRequests(
-        ledger,
-        latestState,
-        antepenultimateState,
-        tx
-      );
+      const requests = await this.store.getPendingLedgerRequests(ledger.channelId, tx);
+      const result = this.compareChangesWithRequests(requests, latestState, antepenultimateState);
 
       // TODO: decide how to handle protocol violations
       if (result.type !== 'full-agreement') throw new Error('protocol error');
@@ -116,7 +162,7 @@ export class LedgerManager {
 
     // so we want to craft a new proposal
     const requests = await this.store.getPendingLedgerRequests(ledger.channelId, tx);
-    const proposedOutcome = await this.buildOutcome(latestState, requests, tx);
+    const proposedOutcome = this.buildOutcome(latestState, requests);
     const proposedState = latestState.advanceToOutcome(proposedOutcome);
 
     await this.store.signState(ledger, proposedState.signedState, tx);
@@ -138,7 +184,9 @@ export class LedgerManager {
     if (ledgerState.type !== 'proposal') return false;
     const {latestState, penultimateState} = ledgerState;
 
-    const result = await this.compareChangesWithRequests(ledger, latestState, penultimateState, tx);
+    const requests = await this.store.getPendingLedgerRequests(ledger.channelId, tx);
+    const result = await this.compareChangesWithRequests(requests, latestState, penultimateState);
+    // also detect those requests that are included in the original
 
     let stateToSign: State;
     switch (result.type) {
@@ -159,7 +207,24 @@ export class LedgerManager {
       }
     }
 
-    // TODO: mark requests as complete
+    // Requests
+    // * immediately mark requests that weren't in the proposal as missed opportunities
+    // * also need to mark off any requests that are included in the agreed state
+    //   (that could have come from the leader agreeing my counterproposal)
+    // * if full agreement, mark those requests as done
+
+    // request is:
+    //   - queued
+    //   - pending
+    //   - succeeded
+    //   - cancelled (when they cancelled out)
+    //   - insufficient-funds
+
+    // the leader tries to put the request in every time
+    // the follower notes each time the leader didn't put it in
+    // store lastProcessedAt on the requests - each time the follower processes at a new turnnumber they increase the failure count
+
+    // how do I know if a request has failed? maybe I don't - maybe the objective failing tells me that
 
     await this.store.signState(ledger, stateToSign.signedState, tx);
     response.queueChannel(ledger);
@@ -171,12 +236,11 @@ export class LedgerManager {
   // - fullAgreement => agree on channels and outcome
   // - someoverlap, narrowedOutcome => have removed
   // - noOverlap
-  async compareChangesWithRequests(
-    ledger: Channel,
+  compareChangesWithRequests(
+    requests: LedgerRequest[],
     baselineState: State,
-    candidateState: State,
-    tx: Transaction
-  ): Promise<CompareChangesWithRequestsResult> {
+    candidateState: State
+  ): CompareChangesWithRequestsResult {
     const baselineOutcome = baselineState.simpleAllocationOutcome;
     const candidateOutcome = candidateState.simpleAllocationOutcome;
 
@@ -188,8 +252,7 @@ export class LedgerManager {
     if (changedDestinations.length === 0) return {type: 'full-agreement'};
 
     // identify which changes from the proposal are also in our list of requests
-    const requestList = await this.store.getPendingLedgerRequests(ledger.channelId, tx);
-    const overlappingRequests = requestList.filter(req =>
+    const overlappingRequests = requests.filter(req =>
       changedDestinations.includes(req.channelToBeFunded)
     );
 
@@ -197,7 +260,7 @@ export class LedgerManager {
       return {type: 'no-overlap', narrowedOutcome: baselineOutcome};
 
     // build the outcome
-    const calculatedOutcome = await this.buildOutcome(baselineState, overlappingRequests, tx);
+    const calculatedOutcome = this.buildOutcome(baselineState, overlappingRequests);
 
     if (overlappingRequests.length === changedDestinations.length) {
       // we've have full overlap
@@ -247,11 +310,7 @@ export class LedgerManager {
     }
   }
 
-  async buildOutcome(
-    state: State,
-    requests: LedgerRequest[],
-    tx: Transaction
-  ): Promise<SimpleAllocationOutcome> {
+  buildOutcome(state: State, requests: LedgerRequest[]): SimpleAllocationOutcome {
     if (!state.simpleAllocationOutcome)
       throw Error("Ledger doesn't have simple allocation outcome");
 
@@ -270,7 +329,7 @@ export class LedgerManager {
       } else {
         // the only way removal fails is if the refund amounts don't match the amount in the channel
         // in that case the request is not viable and should be marked as failed
-        await defundReq.markAsFailed(tx);
+        // await defundReq.markAsFailed(tx);
       }
     }
 
@@ -288,9 +347,8 @@ export class LedgerManager {
       } else {
         // if funding failed, it means that there aren't enough funds left in the channel
         // so mark the request as failed
-
         // TODO: do we actually want to do this here?
-        await fundingReq.markAsFailed(tx);
+        // await fundingReq.markAsFailed(tx);
       }
     }
 
@@ -313,6 +371,7 @@ type CounterProposal = {
 type ProtocolViolation = {type: 'protocol-violation'};
 
 // CompareChangesWithRequestsResult
+// ================================
 type CompareChangesWithRequestsResult = FullAgreement | SomeOverlap | NoOverlap;
 
 type FullAgreement = {type: 'full-agreement'};

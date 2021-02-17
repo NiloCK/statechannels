@@ -3,9 +3,12 @@ import {Model, TransactionOrKnex} from 'objection';
 import {Bytes32, Uint256} from '../type-aliases';
 
 export type LedgerRequestStatus =
+  | 'queued'
+  | 'cancelled'
   | 'pending' // Request added to DB to be handled by ProcessLedgerQueue
   | 'succeeded' // Ledger update became supported and thus request succeeded
-  | 'failed'; // Failed for any reason e.g., lack of available funds
+  | 'insufficient-funds'
+  | 'failed'; // if the ledger closes, or there's a protocol error
 
 export interface LedgerRequestType {
   ledgerChannelId: Bytes32;
@@ -13,6 +16,7 @@ export interface LedgerRequestType {
   status: LedgerRequestStatus;
   amountA: Uint256;
   amountB: Uint256;
+  lastProcessedTurnNum: number;
   missedOpportunityCount: number;
   type: 'fund' | 'defund';
 }
