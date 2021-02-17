@@ -31,12 +31,13 @@ import {DBAdmin} from '../../../db-admin/db-admin';
 import {LedgerRequest} from '../../../models/ledger-request';
 import {WALLET_VERSION} from '../../../version';
 import {PushMessageError} from '../../../errors/wallet-error';
-import {Wallet} from '../..';
+import {MultiThreadedWallet, Wallet} from '../..';
 import {
   getChannelResultFor,
   getSignedStateFor,
   getRequestFor,
 } from '../../../__test__/test-helpers';
+import {WaitingFor} from '../../../protocols/channel-opener';
 
 const dropNonVariables = (s: SignedState): any =>
   _.pick(s, 'appData', 'outcome', 'isFinal', 'turnNum', 'stateHash', 'signatures');
@@ -44,14 +45,20 @@ const dropNonVariables = (s: SignedState): any =>
 jest.setTimeout(20_000);
 
 let wallet: Wallet;
+let multiThreadedWallet: MultiThreadedWallet;
 
 beforeAll(async () => {
   await DBAdmin.migrateDatabase(defaultTestConfig());
   wallet = await Wallet.create(defaultTestConfig());
+
+  multiThreadedWallet = await MultiThreadedWallet.create(
+    defaultTestConfig({workerThreadAmount: 2})
+  );
 });
 
 afterAll(async () => {
   await wallet.destroy();
+  await multiThreadedWallet.destroy();
 });
 beforeEach(async () => seedAlicesSigningWallet(wallet.knex));
 
@@ -294,6 +301,7 @@ describe('when the application protocol returns an action', () => {
           fundingStrategy: 'Fake', // Could also be Direct, funding is empty
           role: 'app',
         },
+        waitingFor: WaitingFor.theirPreFundSetup,
       },
       wallet.knex
     );
@@ -318,6 +326,41 @@ describe('when the application protocol returns an action', () => {
     });
   });
 
+  it.each(['with', 'without'] as const)(
+    'emits objectiveStarted when a wallet %s worker threads receives a new objective',
+    async withOrWithout => {
+      const _wallet: Wallet = withOrWithout === 'with' ? wallet : multiThreadedWallet;
+      const turnNum = 6;
+      const state = stateSignedBy()({outcome: simpleEthAllocation([]), turnNum});
+
+      const c = channel({vars: [addHash(state)]});
+      await Channel.query(_wallet.knex).insert(c);
+
+      const {channelId} = c;
+      const finalState = {...state, isFinal: true, turnNum: turnNum + 1};
+
+      const callback = jest.fn();
+      _wallet.once('objectiveStarted', callback);
+
+      const result = await _wallet.pushMessage({
+        walletVersion: WALLET_VERSION,
+        signedStates: [serializeState(stateSignedBy([bob()])(finalState))],
+        objectives: [
+          {
+            type: 'CloseChannel',
+            participants: [],
+            data: {
+              targetChannelId: channelId,
+              fundingStrategy: 'Direct',
+            },
+          },
+        ],
+      });
+      expect(result.newObjectives).toHaveLength(1);
+      expect(callback).toHaveBeenCalledWith(expect.objectContaining({type: 'CloseChannel'}));
+    }
+  );
+
   it('forms a conclusion proof when the peer wishes to close the channel', async () => {
     const turnNum = 6;
     const state = stateSignedBy()({outcome: simpleEthAllocation([]), turnNum});
@@ -326,8 +369,8 @@ describe('when the application protocol returns an action', () => {
     await Channel.query(wallet.knex).insert(c);
 
     const {channelId} = c;
-
     const finalState = {...state, isFinal: true, turnNum: turnNum + 1};
+
     const p = wallet.pushMessage({
       walletVersion: WALLET_VERSION,
       signedStates: [serializeState(stateSignedBy([bob()])(finalState))],
@@ -548,6 +591,7 @@ describe('ledger funded app scenarios', () => {
           fundingLedgerChannelId: ledger.channelId,
           role: 'app',
         },
+        waitingFor: WaitingFor.theirPreFundSetup,
       },
       wallet.knex
     );

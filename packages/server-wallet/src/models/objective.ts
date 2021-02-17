@@ -10,6 +10,8 @@ import {
 import {Model, TransactionOrKnex} from 'objection';
 import _ from 'lodash';
 
+import {WaitingFor} from '../objectives/objective-manager';
+
 function extractReferencedChannels(objective: Objective): string[] {
   switch (objective.type) {
     case 'OpenChannel':
@@ -33,6 +35,7 @@ export type ObjectiveStatus = 'pending' | 'approved' | 'rejected' | 'failed' | '
 type WalletObjective<O extends Objective> = O & {
   objectiveId: string;
   status: ObjectiveStatus;
+  waitingFor: WaitingFor;
   createdAt: Date;
   progressLastMadeAt: Date;
 };
@@ -93,6 +96,8 @@ export class ObjectiveModel extends Model implements Columns {
   readonly status!: DBObjective['status'];
   readonly type!: DBObjective['type'];
   readonly data!: DBObjective['data'];
+  readonly waitingFor!: DBObjective['waitingFor'];
+  // the default value of waitingFor is '', see Nothing.ToWaitFor type
   createdAt!: Date;
   progressLastMadeAt!: Date;
 
@@ -134,6 +139,7 @@ export class ObjectiveModel extends Model implements Columns {
   static async ensure<O extends DBObjective>(
     objectiveToBeStored: SupportedObjective & {
       status: 'pending' | 'approved' | 'rejected' | 'failed' | 'succeeded';
+      waitingFor: WaitingFor;
     },
     tx: TransactionOrKnex
   ): Promise<O> {
@@ -148,16 +154,45 @@ export class ObjectiveModel extends Model implements Columns {
           data: objectiveToBeStored.data,
           createdAt: new Date(),
           progressLastMadeAt: new Date(),
+          waitingFor: objectiveToBeStored.waitingFor,
         })
+        // `Model.query(tx).insert(o)` returns `o` by default.
+        // The return value is therefore constrained by the type of `Model`.
+        // When data is fetched with e.g. `Model.query(tx).findById()`, however,
+        // the return type is dictated by the DB schema and driver, defined elsewhere.
+        // It is possible for these types to differ:
+        // and we are effectively *asserting* that they are the same.
+        // So it is important to check that the objects returned by *find* queries
+        // are of the same type as `Model`.
+        //
+        // This is particularly important for `timestamp` columns,
+        // which can be inserted as a `Date` or a `string` (without error),
+        // but will be parsed into a `Date` when fetched.
+        //
+        // Chaining `.returning('*').first()` is one way to ensure that the returned object
+        // has the same type as a fetched object. But it has a performance cost, and can still
+        // lead to a bad type assertion: for example, if o.createdAt were a `string`,
+        // by using `.returning('*').first()` that property would in fact be a `Date` when fetched.
+        // This could lead to nasty runtime errors not caught at compile-time, because
+        // the property would type asserted as a `string`.
+        //
+        // We use `.returning('*').first()` here because we are ignoring conflicts,
+        // and want to know what was "already there" in that case.
         .returning('*')
-        .first(); // This ensures that the returned object undergoes any type conversion performed during insert
+        .first()
+        .onConflict('objectiveId')
+        .ignore(); // this avoids a UniqueViolationError being thrown
 
       // Associate the objective with any channel that it references
       // By inserting an ObjectiveChannel row for each channel
       // Requires objective and channels to exist
       await Promise.all(
-        extractReferencedChannels(objectiveToBeStored).map(async value =>
-          ObjectiveChannelModel.query(trx).insert({objectiveId: id, channelId: value})
+        extractReferencedChannels(objectiveToBeStored).map(
+          async value =>
+            ObjectiveChannelModel.query(trx)
+              .insert({objectiveId: id, channelId: value})
+              .onConflict(['objectiveId', 'channelId'])
+              .ignore() // this makes it an upsert
         )
       );
       return model.toObjective<O>();
@@ -167,6 +202,11 @@ export class ObjectiveModel extends Model implements Columns {
   static async forId(objectiveId: string, tx: TransactionOrKnex): Promise<DBObjective> {
     const model = await ObjectiveModel.query(tx).findById(objectiveId);
     return model.toObjective();
+  }
+
+  static async forIds(objectiveIds: string[], tx: TransactionOrKnex): Promise<DBObjective[]> {
+    const model = await ObjectiveModel.query(tx).findByIds(objectiveIds);
+    return model.map(m => m.toObjective());
   }
 
   static async approve(objectiveId: string, tx: TransactionOrKnex): Promise<void> {
@@ -188,11 +228,15 @@ export class ObjectiveModel extends Model implements Columns {
       .first();
   }
 
-  static async progressMade(objectiveId: string, tx: TransactionOrKnex): Promise<DBObjective> {
+  static async updateWaitingFor(
+    objectiveId: string,
+    waitingFor: WaitingFor,
+    tx: TransactionOrKnex
+  ): Promise<DBObjective> {
     return (
       await ObjectiveModel.query(tx)
         .findById(objectiveId)
-        .patch({progressLastMadeAt: new Date()})
+        .patch({progressLastMadeAt: new Date(), waitingFor})
         .returning('*')
         .first()
     ).toObjective();

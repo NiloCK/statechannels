@@ -4,6 +4,8 @@ import {createChannelArgs} from '../fixtures/create-channel';
 import {seedAlicesSigningWallet} from '../../../db/seeds/1_signing_wallet_seeds';
 import {defaultTestConfig} from '../../../config';
 import {DBAdmin} from '../../../db-admin/db-admin';
+import {DBOpenChannelObjective} from '../../../models/objective';
+import {WaitingFor} from '../../../protocols/channel-opener';
 
 let w: Wallet;
 beforeEach(async () => {
@@ -18,7 +20,7 @@ afterEach(async () => {
 describe('happy path', () => {
   beforeEach(async () => seedAlicesSigningWallet(w.knex));
 
-  it('creates a channel and emits an ObjectiveStarted event', async () => {
+  it('creates a channel, emits an ObjectiveStarted event, and allows an objective to be queried through the API', async () => {
     expect(await Channel.query(w.knex).resultSize()).toEqual(0);
 
     const appData = '0xaf00';
@@ -28,9 +30,10 @@ describe('happy path', () => {
     const channelId = '0x4460dab6d4438f3bf1719720fcced4054a38baf60f315e49995eead80cfa498f';
     expect(createResult).toMatchObject({channelResults: [{channelId}]});
     expect(createResult.newObjectives).toHaveLength(1);
+    const objectiveId = `OpenChannel-${channelId}`;
     expect(createResult.newObjectives).toContainObject({
       type: 'OpenChannel',
-      objectiveId: `OpenChannel-${channelId}`,
+      objectiveId,
     });
 
     expect(createResult).toMatchObject({
@@ -69,6 +72,16 @@ describe('happy path', () => {
       latest: expectedState,
       latestSignedByMe: expectedState,
       supported: undefined,
+    });
+    expect(await w.getObjective(objectiveId)).toMatchObject<DBOpenChannelObjective>({
+      objectiveId,
+      createdAt: expect.any(Date),
+      progressLastMadeAt: expect.any(Date),
+      status: 'approved',
+      participants: [],
+      waitingFor: WaitingFor.theirPreFundSetup,
+      type: 'OpenChannel',
+      data: expect.anything(),
     });
   });
 

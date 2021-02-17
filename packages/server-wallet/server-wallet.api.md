@@ -293,6 +293,7 @@ export class SingleThreadedWallet extends EventEmitter<EventEmitterType> impleme
     destroy(): Promise<void>;
     getChannels(): Promise<MultipleChannelOutput>;
     getLedgerChannels(assetHolderAddress: string, participants: Participant_2[]): Promise<MultipleChannelOutput>;
+    getObjective(objectiveId: string): Promise<DBObjective>;
     getSigningAddress(): Promise<Address>;
     getState({ channelId }: GetStateParams): Promise<SingleChannelOutput>;
     // Warning: (ae-forgotten-export) The symbol "HoldingUpdatedArg" needs to be exported by the entry point index.d.ts
@@ -325,6 +326,7 @@ export class SingleThreadedWallet extends EventEmitter<EventEmitterType> impleme
     syncChannel({ channelId }: SyncChannelParams): Promise<SingleChannelOutput>;
     // Warning: (ae-forgotten-export) The symbol "Bytes32" needs to be exported by the entry point index.d.ts
     syncChannels(channelIds: Bytes32[]): Promise<MultipleChannelOutput>;
+    syncObjectives(objectiveIds: string[]): Promise<MultipleChannelOutput>;
     updateChannel({ channelId, allocations, appData, }: UpdateChannelParams): Promise<SingleChannelOutput>;
     updateChannelFunding(args: UpdateChannelFundingParams): Promise<SingleChannelOutput>;
     updateFundingForChannels(args: UpdateChannelFundingParams[]): Promise<MultipleChannelOutput>;

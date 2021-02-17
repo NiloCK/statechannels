@@ -58,7 +58,7 @@ afterAll(async () => {
   await knexReceiver.destroy();
 });
 
-describe('e2e', () => {
+describe.each([0, 2])('e2e with %i worker threads', workerThreadAmount => {
   let payerClient: PayerClient;
 
   let payer: Participant;
@@ -66,7 +66,10 @@ describe('e2e', () => {
 
   beforeAll(async () => {
     // Create actors
-    payerClient = await PayerClient.create(alice().privateKey, `http://127.0.0.1:65535`);
+    payerClient = await PayerClient.create(alice().privateKey, `http://127.0.0.1:65535`, {
+      workerThreadAmount,
+      loggingConfiguration: {logDestination: '/tmp/server-wallet.e2e-test.log', logLevel: 'trace'},
+    });
 
     // Gets participant info for testing convenience
     payer = payerClient.me;

@@ -11,7 +11,6 @@ import {
   isOpenChannel,
   isCloseChannel,
   SignedState,
-  objectiveId,
   isSimpleAllocation,
   checkThat,
   OpenChannel,
@@ -21,7 +20,11 @@ import {
   PrivateKey,
   isSubmitChallenge,
 } from '@statechannels/wallet-core';
-import {Payload as WirePayload, SignedState as WireSignedState} from '@statechannels/wire-format';
+import {
+  CloseChannel,
+  Payload as WirePayload,
+  SignedState as WireSignedState,
+} from '@statechannels/wire-format';
 import _ from 'lodash';
 import {ChannelResult, FundingStrategy} from '@statechannels/client-api-schema';
 import {ethers} from 'ethers';
@@ -58,6 +61,10 @@ import {createLogger} from '../logger';
 import {LedgerProposal} from '../models/ledger-proposal';
 import {ChainServiceRequest} from '../models/chain-service-request';
 import {AdjudicatorStatusModel} from '../models/adjudicator-status';
+import {WaitingFor as DefundChannelWaitingFor} from '../protocols/defund-channel';
+import {WaitingFor as OpenChannelWaitingFor} from '../protocols/channel-opener';
+import {WaitingFor as CloseChannelWaitingFor} from '../protocols/channel-closer';
+import {NarrowedWaitingFor, Nothing, WaitingFor} from '../objectives/objective-manager';
 
 const defaultLogger = createLogger(defaultTestConfig());
 
@@ -279,6 +286,10 @@ export class Store {
     return {states: vars.map(ss => _.merge(ss, channelConstants)), channelState};
   }
 
+  async getObjectivesByIds(objectiveIds: string[]): Promise<DBObjective[]> {
+    return ObjectiveModel.forIds(objectiveIds, this.knex);
+  }
+
   async getChannels(): Promise<ChannelState[]> {
     return (await Channel.query(this.knex)).map(channel => channel.protocolState);
   }
@@ -305,6 +316,7 @@ export class Store {
   ): Promise<{
     channelIds: Bytes32[];
     channelResults: ChannelResult[];
+    storedObjectives: DBObjective[];
   }> {
     return this.knex.transaction(async tx => {
       const channelResults: ChannelResult[] = [];
@@ -319,10 +331,17 @@ export class Store {
       }
 
       const deserializedObjectives = message.objectives?.map(deserializeObjective) || [];
-      const storedObjectives = [];
+      const storedObjectives: DBObjective[] = [];
       for (const o of deserializedObjectives) {
         if (o.type == 'OpenChannel' || o.type == 'CloseChannel')
-          storedObjectives.push(await this.ensureObjective(o, 'pending', tx));
+          storedObjectives.push(
+            await this.ensureObjective<DBOpenChannelObjective | DBCloseChannelObjective>(
+              o,
+              Nothing.ToWaitFor,
+              'pending',
+              tx
+            )
+          );
         // ignore unsupported shared objectives for now (e.g. VirtuallyFund)
       }
 
@@ -336,6 +355,10 @@ export class Store {
       return {
         channelIds: stateChannelIds.concat(objectiveChannelIds),
         channelResults,
+        // HACK (1): This may cause the wallet to re-emit `'objectiveStarted'` multiple times
+        // For instance, a peer who sends me an objective `o`, and then triggers `syncObjectives`
+        // including `o`, will cause my wallet to emit `'objectiveStarted'` for `o` twice.
+        storedObjectives,
       };
     });
   }
@@ -396,6 +419,7 @@ export class Store {
    */
   async ensureObjective<O extends DBObjective>(
     objective: SupportedObjective,
+    waitingFor: NarrowedWaitingFor<O>,
     status: ObjectiveStatus,
     tx: Transaction
   ): Promise<O> {
@@ -404,7 +428,7 @@ export class Store {
       case 'CloseChannel':
       case 'SubmitChallenge':
       case 'DefundChannel':
-        return ObjectiveModel.ensure<O>({...objective, status}, tx);
+        return ObjectiveModel.ensure<O>({...objective, status, waitingFor}, tx);
       default:
         throw new StoreError(StoreError.reasons.unimplementedObjective);
     }
@@ -620,7 +644,12 @@ export class Store {
         },
       };
 
-      const dbObjective = await this.ensureObjective(objective, 'approved', tx); // pre-approved on insert
+      const dbObjective = await this.ensureObjective<DBOpenChannelObjective>(
+        objective,
+        OpenChannelWaitingFor.theirPreFundSetup,
+        'approved',
+        tx
+      ); // pre-approved on insert
 
       return {
         channel: await this.getChannelState(channelId, tx),
@@ -657,9 +686,16 @@ export class Store {
   async markAdjudicatorStatusAsFinalized(
     channelId: string,
     blockNumber: number,
-    blockTimestamp: number
+    blockTimestamp: number,
+    finalizedAt: number
   ): Promise<void> {
-    await AdjudicatorStatusModel.setFinalized(this.knex, channelId, blockNumber, blockTimestamp);
+    await AdjudicatorStatusModel.setFinalized(
+      this.knex,
+      channelId,
+      blockNumber,
+      blockTimestamp,
+      finalizedAt
+    );
   }
 
   async updateTransferredOut(

@@ -58,6 +58,7 @@ import {WALLET_VERSION} from '../version';
 import {ObjectiveManager} from '../objectives';
 import {SingleAppUpdater} from '../handlers/single-app-updater';
 import {LedgerManager} from '../protocols/ledger-manager';
+import {DBObjective} from '../models/objective';
 
 import {Store, AppHandler, MissingAppHandler} from './store';
 import {
@@ -288,6 +289,41 @@ export class SingleThreadedWallet
   }
 
   /**
+   * Trigger a response containing a message for counterparties, with all objectives and channels for a set of objectives.
+   * @param objectiveIds The ids of the objectives that should be sent to the counterparties
+   * @returns A promise that resolves to an object containing the messages.
+   */
+  public async syncObjectives(objectiveIds: string[]): Promise<MultipleChannelOutput> {
+    const response = WalletResponse.initialize();
+    const objectives = await this.store.getObjectivesByIds(objectiveIds);
+
+    const fetchedObjectiveIds = objectives.map(o => o.objectiveId);
+    const missingObjectives = _.difference(objectiveIds, fetchedObjectiveIds);
+
+    if (missingObjectives.length > 0) {
+      this.logger.error(
+        {objectiveIds: missingObjectives},
+        'The following objectives cannot be found'
+      );
+      throw new Error('Could not find all objectives');
+    }
+
+    for (const o of objectives) {
+      // NOTE: Currently we're fetching the channel twice
+      // Once here and one in syncChannel
+      // This could be refactored if performance is an issue
+      const channel = await this.store.getChannelState(o.data.targetChannelId);
+      // This will make sure any relevant channel information is synced
+      await this._syncChannel(channel.channelId, response);
+
+      const {participants} = channel;
+      response.queueSendObjective(o, channel.myIndex, participants);
+    }
+
+    return response.multipleChannelOutput();
+  }
+
+  /**
    * Trigger a response containing a message for all counterparties, with all stored states for a given channel.
    *
    * @param channelId - The channel id to be sync'ed
@@ -447,6 +483,8 @@ export class SingleThreadedWallet
       'ledger'
     );
 
+    // NB: We intentionally do not call this.takeActions, because there are no actions to take when creating a channel.
+
     return response.singleChannelOutput();
   }
   /**
@@ -466,6 +504,8 @@ export class SingleThreadedWallet
 
     await this._createChannel(response, args, 'app');
 
+    // NB: We intentionally do not call this.takeActions, because there are no actions to take when creating a channel.
+
     return response.multipleChannelOutput();
   }
   /**
@@ -484,6 +524,8 @@ export class SingleThreadedWallet
     await Promise.all(
       _.range(numberOfChannels).map(() => this._createChannel(response, args, 'app'))
     );
+
+    // NB: We intentionally do not call this.takeActions, because there are no actions to take when creating a channel.
 
     return response.multipleChannelOutput();
   }
@@ -746,6 +788,15 @@ export class SingleThreadedWallet
   }
 
   /**
+   * Gets the objective for a given id.
+   *
+   * @returns A promise that resolves to a DBObjective, with a progressLastMadeAt timestamp
+   */
+  async getObjective(objectiveId: string): Promise<DBObjective> {
+    return this.store.getObjective(objectiveId);
+  }
+
+  /**
    * Gets the latest state for a channel.
    *
    * @privateRemarks TODO: Consider renaming this to getChannel() to match getChannels()
@@ -823,7 +874,13 @@ export class SingleThreadedWallet
     const {
       channelIds: channelIdsFromStates,
       channelResults: fromStoring,
+      storedObjectives,
     } = await this.store.pushMessage(wirePayload);
+
+    // HACK (1): This may cause the wallet to re-emit `'objectiveStarted'` multiple times
+    // For instance, a peer who sends me an objective `o`, and then triggers `syncObjectives`
+    // including `o`, will cause my wallet to emit `'objectiveStarted'` for `o` twice.
+    response.createdObjectives = storedObjectives;
 
     const channelIdsFromRequests: Bytes32[] = [];
     const requests = (wirePayload.requests || []).map(deserializeRequest);
@@ -898,6 +955,7 @@ export class SingleThreadedWallet
       needToCrank = await this.processLedgerQueue(channels, response);
     }
 
+    response.createdObjectives.map(o => this.emit('objectiveStarted', o));
     response.succeededObjectives.map(o => this.emit('objectiveSucceeded', o));
   }
 
@@ -997,7 +1055,8 @@ export class SingleThreadedWallet
     await this.store.markAdjudicatorStatusAsFinalized(
       arg.channelId,
       arg.blockNumber,
-      arg.blockTimestamp
+      arg.blockTimestamp,
+      arg.finalizedAt
     );
     await this.knex.transaction(async tx => {
       const objective = await this.store.ensureObjective(

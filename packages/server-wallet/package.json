@@ -1,23 +1,23 @@
 {
   "name": "@statechannels/server-wallet",
   "description": "http server statechannel wallet",
-  "version": "1.20.0",
+  "version": "1.22.0",
   "author": "",
   "dependencies": {
     "@connext/pure-evm-wasm": "0.1.4",
     "@ethersproject/experimental": "5.0.5",
-    "@statechannels/client-api-schema": "0.9.0",
-    "@statechannels/nitro-protocol": "0.15.0",
-    "@statechannels/wallet-core": "0.12.0",
+    "@statechannels/client-api-schema": "0.10.0",
+    "@statechannels/nitro-protocol": "0.16.0",
+    "@statechannels/wallet-core": "0.13.0",
     "@statechannels/wasm-utils": "0.1.6",
-    "@statechannels/wire-format": "0.8.7",
+    "@statechannels/wire-format": "0.8.8",
     "ethers": "5.0.12",
     "eventemitter3": "4.0.7",
     "fp-ts": "2.7.0",
     "joi": "^17.3.0",
     "knex": "0.21.12",
     "lodash": "4.17.20",
-    "objection": "2.2.3",
+    "objection": "2.2.4",
     "p-map": "^4.0.0",
     "p-queue": "^6.6.2",
     "pg": "7.17.1",
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@pacote/jest-either": "4.0.4",
-    "@statechannels/devtools": "0.5.4",
+    "@statechannels/devtools": "0.5.5",
     "@types/autocannon": "4.1.0",
     "@types/body-parser": "1.19.0",
     "@types/eslint": "7.2.3",
@@ -100,8 +100,8 @@
     "test": "yarn jest -c ./jest/jest.config.js --runInBand",
     "test:chain": "jest -c ./jest/jest.chain.config.js --runInBand",
     "test:ci": "yarn test --bail && yarn test:chain --bail",
-    "test:e2e": "yarn tsc; yarn jest -c ./jest/jest.e2e.config.js --runInBand",
-    "test:stress": "yarn tsc;NODE_ENV=test npx ts-node ./e2e-test/scripts/stress-test.ts"
+    "test:e2e": "./src/test_db.sh server_wallet_payer server_wallet_receiver; yarn tsc; yarn jest -c ./jest/jest.e2e.config.js --runInBand",
+    "test:stress": "./src/test_db.sh server_wallet_payer server_wallet_receiver; yarn tsc; NODE_ENV=test npx ts-node ./e2e-test/scripts/stress-test.ts"
   },
   "types": "lib/src/index.d.ts"
 }

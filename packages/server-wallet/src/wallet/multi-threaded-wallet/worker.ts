@@ -3,13 +3,20 @@ import {parentPort, isMainThread, workerData, threadId} from 'worker_threads';
 import {left, right} from 'fp-ts/lib/Either';
 
 import {createLogger} from '../../logger';
-import {Wallet} from '../..';
 import {timerFactory} from '../../metrics';
 import {ServerWalletConfig} from '../../config';
+import {SingleThreadedWallet} from '..';
+import {WalletEvent} from '../types';
 
 import {isStateChannelWorkerData} from './worker-data';
 
 startWorker();
+
+function relayWalletEvents<E extends WalletEvent>(name: E['type']) {
+  return (value: E['value']): void => {
+    parentPort?.postMessage({type: 'WalletEventEmitted', name, value});
+  };
+}
 
 async function startWorker() {
   // We only expect a worker thread to use one postgres connection but we enforce it just to make sure
@@ -22,10 +29,14 @@ async function startWorker() {
     workerThreadAmount: 0, // don't want workers to start more workers
   };
 
-  const logger = createLogger(walletConfig);
+  const logger = createLogger(walletConfig).child({threadId});
 
   logger.debug(`Worker %o starting`, threadId);
-  const wallet = await Wallet.create(walletConfig);
+  const wallet = await SingleThreadedWallet.create(walletConfig);
+
+  const events = ['channelUpdated', 'objectiveStarted', 'objectiveSucceeded'] as const;
+  events.forEach(name => wallet.on(name, relayWalletEvents(name)));
+
   parentPort?.on('message', async (message: any) => {
     if (isMainThread) {
       parentPort?.postMessage(

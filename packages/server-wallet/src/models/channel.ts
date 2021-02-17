@@ -13,6 +13,7 @@ import {
   checkThat,
   isSimpleAllocation,
   BN,
+  unreachable,
 } from '@statechannels/wallet-core';
 import {JSONSchema, Model, Pojo, QueryContext, ModelOptions, TransactionOrKnex} from 'objection';
 import {ChannelResult, FundingStrategy} from '@statechannels/client-api-schema';
@@ -387,7 +388,7 @@ export class Channel extends Model implements ChannelColumns {
 
     const noFinalStates = _.every(this.sortedStates, s => !s.isFinal);
 
-    return this.postfundSupported && noFinalStates;
+    return this.postFundComplete && noFinalStates;
   }
 
   /**
@@ -406,31 +407,36 @@ export class Channel extends Model implements ChannelColumns {
   }
 
   /**
-   * Is a prefund state (or later) supported
+   * Have all participants signed a consistent preFund state?
    */
-  public get prefundSupported(): boolean {
-    // all states are later than the prefund, so we just check if have any supported state
+  public get preFundComplete(): boolean {
+    // The existence of any supported state implies a supported prefund state
+    // which implies a full set (nParticipants) of consistent preFund signatures has been seen
+    // (since no state is earlier than a prefund state).
     return !!this.supported;
   }
 
   /**
-   * Is a postfund state (or later) supported
+   * Have all participants signed a consistent postFund state?
    */
-  public get postfundSupported(): boolean {
+  public get postFundComplete(): boolean {
+    // The existence of a supported state with sufficiently high turnNum
+    // (at least the highest postFund state)
+    // implies a full set (nParticipants) of consistent postFund signatures has been seen.
     return !!this.supported && this.supported.turnNum >= 2 * this.nParticipants - 1;
   }
 
   // Does the channel have funds to pay out to all allocation items?
   public get isFullyDirectFunded(): boolean {
-    return this.isDirectFunded(true);
+    return this.isDirectFunded('FullyFunded');
   }
 
   // Does the channel have any funds that I can claim?
   public get isPartlyDirectFunded(): boolean {
-    return this.isDirectFunded();
+    return this.isDirectFunded('PartlyFunded');
   }
 
-  private isDirectFunded(fully?: boolean): boolean {
+  private isDirectFunded(threshold: 'FullyFunded' | 'PartlyFunded'): boolean {
     const outcome = this.supported?.outcome;
     if (!outcome) {
       throw new Error(`Channel passed to isDirectFunded has no supported state`);
@@ -440,12 +446,17 @@ export class Channel extends Model implements ChannelColumns {
     const channelFunds = this.funding.find(f => f.assetHolder === assetHolderAddress);
     if (!channelFunds) return false;
 
-    if (fully) {
-      const fullFunding = allocationItems.map(a => a.amount).reduce(BN.add, BN.from(0));
-      return BN.gte(channelFunds.amount, fullFunding);
-    } else {
-      const fundingBeforeMe = this.fundingMilestones[0];
-      return BN.gt(channelFunds.amount, fundingBeforeMe);
+    switch (threshold) {
+      case 'FullyFunded': {
+        const fullFunding = allocationItems.map(a => a.amount).reduce(BN.add, BN.from(0));
+        return BN.gte(channelFunds.amount, fullFunding);
+      }
+      case 'PartlyFunded': {
+        const fundingBeforeMe = this.fundingMilestones.targetBefore;
+        return BN.gt(channelFunds.amount, fundingBeforeMe);
+      }
+      default:
+        unreachable(threshold);
     }
   }
 
@@ -457,7 +468,11 @@ export class Channel extends Model implements ChannelColumns {
    *
    * @param channel
    */
-  public get fundingMilestones(): [Uint256, Uint256, Uint256] {
+  public get fundingMilestones(): {
+    targetBefore: Uint256;
+    targetAfter: Uint256;
+    targetTotal: Uint256;
+  } {
     /**
      * The below logic assumes:
      *  1. Each destination occurs at most once.
@@ -482,9 +497,9 @@ export class Channel extends Model implements ChannelColumns {
 
     const targetAfter = BN.add(targetBefore, myAllocationItem.amount);
 
-    const total = allocationItems.map(a => a.amount).reduce(BN.add, BN.from(0));
+    const targetTotal = allocationItems.map(a => a.amount).reduce(BN.add, BN.from(0));
 
-    return [targetBefore, targetAfter, total];
+    return {targetBefore, targetAfter, targetTotal};
   }
 
   private mySignature(signatures: SignatureEntry[]): boolean {
