@@ -67,20 +67,21 @@ import {LedgerRequest} from '../models/ledger-request';
 // The lastAgreedStateSeen is a piece of bookkeeping to so that the LedgerManager can
 // accurately update the missedOpportunityCount.
 //
-// 1. see which requests are in the agreed state
+// 1. identify any potential cancellations (defunds for which the fundings are still active)
+// 2. see which requests (excluding potential cancellations) are in the agreed state
 //    - mark them as success, also setting lastAgreedStateSeen
 //    - for all other requests, if haven't seen this agreedState:
 //      - increase the lastAgreedStateSeen
 //      - increase missedOps
 //      - mark as queued
-// 2. cancel out any queued defundings + fundings => mark these as cancelled
-// 3. decide whether to sign the current state
+// 3. if the potential cancellation's partner is queued, cancel both. If not, add back in to requests
+// 4. decide whether to sign the current state
 //    - if yes, mark all included as done
 //    - and for all other requests, if haven't seen this agreedState (they won't have!):
 //      - increase the lastAgreedStateSeen
 //      - increase missedOps
 //      - mark as queued
-// 4. decide whether to propose a new state
+// 5. decide whether to propose a new state
 //    - if yes, mark all included as pending
 //    - if any don't fit, mark them as insuffient-funds
 //
@@ -113,14 +114,36 @@ export class LedgerManager {
       if (!ledger.isRunning) return false;
       if (!ledger.isLedger) return false;
 
-      // grab the requests
-      // mark any that are agreed as done
+      // determine which state we're in
+      const ledgerState = this.determineLedgerState(ledger);
+      if (ledgerState.type === 'protocol-violation') throw new Error('protocol violation');
 
+      // grab the requests
+      const requests = await this.store.getPendingLedgerRequests(ledger.channelId, tx);
+
+      // identify potential cancellations (defunds for which the fund is still active)
+      // we need to temporarily remove these so we don't mistakenly think that the defund
+      // has succeeded just because the channel isn't in the ledger
+      const {cancellationDefunds, nonCancellations} = this.identifyPotentialCancellations(requests);
+
+      // this marks any requests that are in the agreedState as success
+      // any pending requests that haven't seen this agreedState yet will be reset to queued
+      // the missedOpportunity counts will be increased for any requests that haven't seen this agreedState yet
+      this.updateRequestsWithAgreed(nonCancellations, ledgerState.agreedState);
+
+      // we can now apply the cancellations to any requests that are now in the queued state
+      this.applyCancellations(cancellationDefunds, requests);
+
+      // what happens next depends on whether we're the leader or follower
       if (ledger.myIndex === 0) {
-        await this.crankAsLeader(ledger, response, tx);
+        await this.crankAsLeader(ledger, ledgerState, response, tx);
       } else {
-        await this.crankAsFollower(ledger, response, tx);
+        await this.crankAsFollower(ledger, ledgerState, response, tx);
       }
+
+      // save all requests
+      // save the ledger
+      // send response
 
       return true;
     });
@@ -128,17 +151,17 @@ export class LedgerManager {
 
   private async crankAsLeader(
     ledger: Channel,
+    ledgerState: Omit<LedgerState, ProtocolViolation>,
     response: WalletResponse,
     tx: Transaction
   ): Promise<boolean> {
     // determine which state we're in
     const ledgerState = this.determineLedgerState(ledger);
-    if (ledgerState.type === 'protocol-violation') throw new Error('protocol violation');
 
     // leader doesn't act in the proposal state
     if (ledgerState.type === 'proposal') return false;
 
-    const {latestState} = ledgerState;
+    const {agreedState} = ledgerState;
 
     if (ledgerState.type === 'counter-proposal') {
       const {antepenultimateState} = ledgerState;
@@ -230,6 +253,17 @@ export class LedgerManager {
     response.queueChannel(ledger);
 
     return true;
+  }
+
+  // see which requests are in the agreed state
+  //    - mark them as success, also setting lastAgreedStateSeen
+  //    - for all other requests, if haven't seen this agreedState:
+  //      - increase the lastAgreedStateSeen
+  //      - increase missedOps
+  //      - mark as queued
+  //    - don't mark potential cancellations
+  updateRequestsWithAgreed(requests: LedgerRequest[], agreedState: State): void {
+    // todo
   }
 
   // compareChangesWithRequest
@@ -360,13 +394,13 @@ export class LedgerManager {
 // ===========
 type LedgerState = Agreement | Proposal | CounterProposal | ProtocolViolation;
 
-type Agreement = {type: 'agreement'; latestState: State};
-type Proposal = {type: 'proposal'; latestState: State; penultimateState: State};
+type Agreement = {type: 'agreement'; agreedState: State};
+type Proposal = {type: 'proposal'; agreedState: State; proposal: State};
 type CounterProposal = {
   type: 'counter-proposal';
-  latestState: State;
-  penultimateState: State;
-  antepenultimateState: State;
+  counterProposal: State;
+  proposal: State;
+  agreedState: State;
 };
 type ProtocolViolation = {type: 'protocol-violation'};
 
