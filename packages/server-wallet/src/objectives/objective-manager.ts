@@ -1,5 +1,11 @@
 import {Logger} from 'pino';
-import {unreachable} from '@statechannels/wallet-core';
+import {
+  CloseChannel,
+  DefundChannel,
+  Objective,
+  SubmitChallenge,
+  unreachable,
+} from '@statechannels/wallet-core';
 import {Transaction} from 'knex';
 
 import {Bytes32} from '../type-aliases';
@@ -17,6 +23,7 @@ import {DBObjective, ObjectiveModel} from '../models/objective';
 
 import {ObjectiveManagerParams} from './types';
 import {CloseChannelObjective} from './close-channel';
+import {OpenChannel} from '@statechannels/wire-format';
 
 // Nothing.ToWaitFor is a special type
 // returned from a cranker when the objective completes
@@ -32,6 +39,16 @@ export type WaitingFor =
   | ChallengeSubmitterWaitingFor
   | DefundChannelWaitingFor
   | Nothing;
+
+export type NarrowedWaitingFor<O extends Objective> = O extends OpenChannel
+  ? ChannelOpenerWaitingFor
+  : O extends CloseChannel
+  ? ChannelCloserWaitingFor
+  : O extends SubmitChallenge
+  ? ChallengeSubmitterWaitingFor
+  : O extends DefundChannel
+  ? DefundChannelWaitingFor
+  : WaitingFor;
 
 export interface Cranker<O extends DBObjective> {
   crank: (objective: O, response: WalletResponse, tx: Transaction) => Promise<WaitingFor | Nothing>;
